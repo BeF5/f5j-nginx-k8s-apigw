@@ -355,7 +355,7 @@ STATEが ``Valid`` であることを確認します
 
 ``v1`` と ``v2`` が交互に応答されていることがわかります。これは ``webapp-svc`` が、 ``target-svc`` に通信を転送した結果となります。
 
-3. NSM設定のデプロイ (割合2:8)
+3. NSM設定のデプロイ (割合9:1)
 ----
 
 NSMを使い ``target-svc`` から、 ``target-v1-0 `` 、 ``target-v2-0`` に対する通信を対象に割合の指定を行います
@@ -405,7 +405,7 @@ NSMを使い ``target-svc`` から、 ``target-v1-0 `` 、 ``target-v2-0`` に�
   target-ts   19s
 
 
-4. NSM設定の動作確認 (割合2:8)
+4. NSM設定の動作確認 (割合9:1)
 ----
 
 以下のコマンドで ``20回`` リクエストを送付します。結果を確認します
@@ -652,7 +652,7 @@ JWT Validationの動作を確認します
   kubectl delete -f jwt-nic-nsm/nsm-split-jwt.yaml -n staging
 
 
-4. JWT制御の対象をWAFで防御する
+4. JWT制御とWAFで防御する
 ====
 
 以下の構成で動作を確認します
@@ -668,7 +668,7 @@ JWTによる通信制御はAPIを保護する有効な手段ですが、正し�
 
 設定の内容を確認します。
 JWTに関する設定は 
-`3. NIC/NSMのJWT制御 <>`__ 
+`3. NIC/NSMのJWT制御 <https://f5j-nginx-k8s-apigw.readthedocs.io/en/latest/class1/module03/module03.html#nic-nsmjwt>`__ 
 と同様に
 `Ingress Controller で JWT Validation のデプロイ <https://f5j-nginx-ingress-controller-lab1.readthedocs.io/en/latest/class1/module3/module3.html#ingress-controller-jwt-validation>`__
 を利用しています。
@@ -755,6 +755,9 @@ WAFは数多くの設定により悪意ある通信をブロックすること�
   kubectl apply -f waf-nic-vs/waf.yaml -n staging
   kubectl apply -f waf-nic-vs/nic-vs-waf-jwt.yaml -n staging
 
+反映の結果を確認します
+
+
 .. code-block:: cmdin
 
   kubectl get aplogconf,appolicy,policy -n staging
@@ -831,6 +834,8 @@ WAFは数多くの設定により悪意ある通信をブロックすること�
 
 3. 不要設定の削除
 ----
+
+不要な設定を削除します
 
 .. code-block:: cmdin
 
