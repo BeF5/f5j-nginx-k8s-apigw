@@ -652,7 +652,7 @@ JWT Validationの動作を確認します
   kubectl delete -f jwt-nic-nsm/nsm-split-jwt.yaml -n staging
 
 
-4. JWT制御とWAFで防御する
+4. JWT制御とWAFによる防御
 ====
 
 以下の構成で動作を確認します
@@ -671,7 +671,7 @@ JWTに関する設定は
 `3. NIC/NSMのJWT制御 <https://f5j-nginx-k8s-apigw.readthedocs.io/en/latest/class1/module03/module03.html#nic-nsmjwt>`__ 
 と同様に
 `Ingress Controller で JWT Validation のデプロイ <https://f5j-nginx-ingress-controller-lab1.readthedocs.io/en/latest/class1/module3/module3.html#ingress-controller-jwt-validation>`__
-を利用しています。
+の内容を利用しています。
 
 WAFの設定は最低限の設定を行い、外部からの攻撃をブロックできる設定としています。
 
@@ -683,7 +683,7 @@ WAFの設定は最低限の設定を行い、外部からの攻撃をブロッ�
 .. code-block:: bash
   :linenos:
   :caption: 実行結果サンプル
-  :emphasize-lines: 8
+  :emphasize-lines: 9
 
   apiVersion: appprotect.f5.com/v1beta1
   kind: APPolicy
@@ -846,3 +846,495 @@ WAFは数多くの設定により悪意ある通信をブロックすること�
   kubectl delete -f waf-nic-vs/simple-ap.yaml -n staging
   kubectl delete -f waf-nic-vs/waf.yaml -n staging
   kubectl delete -f waf-nic-vs/nic-vs-waf-jwt.yaml -n staging
+
+
+5. NICによる条件に応じた制御
+====
+
+以下の構成で動作を確認します
+
+   .. image:: ./media/nic-vs-acl.png
+      :width: 400
+
+``request_path`` , ``methods`` , ``headers`` による通信制御を確認します
+
+1. 設定のデプロイ
+----
+
+設定の内容を確認します
+
+.. code-block:: cmdin
+
+  ## cd ~/f5j-nginx-k8s-apigw-lab/example
+  cat jwt-nic-nsm/nic-vs-acl.yaml
+
+.. code-block:: bash
+  :linenos:
+  :caption: 実行結果サンプル
+  :emphasize-lines: 13-15,19-22,24-27,28-32
+
+  apiVersion: k8s.nginx.org/v1
+  kind: VirtualServer
+  metadata:
+    name: nic
+  spec:
+    host: nic.example.com
+    policies:
+    upstreams:
+    - name: target-svc
+      service: target-svc
+      port: 80
+    routes:
+    - path: ~ /.*valid.*
+      action:
+        pass: target-svc
+    - path: /
+      matches:
+      - conditions:
+        - header: X-Type
+          value: valid
+        action:
+          pass: target-svc
+      - conditions:
+        - variable: $request_method
+          value: POST
+        action:
+          pass: target-svc
+      action:
+        return:
+          code: 403
+          type: text/plain
+          body: "Error\n"
+
+- 13-15行目で、 PATHの条件を正規表現で指定し、 ``valid`` の文字列が含まれる場合、 ``target-svc`` に転送します
+- 19-22行目で、 ``X-Type`` というHTTP Headerの値をチェックし ``valid`` である場合、 ``target-svc`` に転送します
+- 24-27行目で、 ``$request_method`` という変数を指定しHTTP Methodが ``POST`` である場合、 ``target-svc`` に転送します
+- その他の通信は、 ``path: /`` の 28-32行目の条件に該当します 
+
+設定を反映します
+
+.. code-block:: cmdin
+
+  ## cd ~/f5j-nginx-k8s-apigw-lab/example
+  kubectl apply -f acl-nic-vs/nic-vs-acl.yaml -n staging
+
+2. 動作確認
+----
+
+動作を確認します
+
+まずシンプルなリクエストを送付し、結果を確認します
+
+.. code-block:: cmdin
+
+  curl -v -H "Host: nic.example.com" http://localhost/
+
+.. code-block:: bash
+  :linenos:
+  :caption: 実行結果サンプル
+
+  *   Trying 127.0.0.1:80...
+  * TCP_NODELAY set
+  * Connected to localhost (127.0.0.1) port 80 (#0)
+  > GET / HTTP/1.1
+  > Host: nic.example.com
+  > User-Agent: curl/7.68.0
+  > Accept: */*
+  >
+  * Mark bundle as not supporting multiuse
+  < HTTP/1.1 403 Forbidden
+  < Server: nginx/1.21.6
+  < Date: Wed, 30 Nov 2022 12:32:55 GMT
+  < Content-Type: text/plain
+  < Content-Length: 6
+  < Connection: keep-alive
+  <
+  Error
+
+通信を送付したところ ``403`` が応答されていることがわかります。curlコマンドではデフォルトのMethodがGETであり、指定したポリシーの条件に該当しないためエラーとなっています
+
+
+ポリシーに記述したMethodでリクエストを送付します。
+
+.. code-block:: cmdin
+
+  curl -v -H "Host: nic.example.com" http://localhost/ -X POST
+
+.. code-block:: bash
+  :linenos:
+  :caption: 実行結果サンプル
+  :emphasize-lines: 4,10,18
+
+  *   Trying 127.0.0.1:80...
+  * TCP_NODELAY set
+  * Connected to localhost (127.0.0.1) port 80 (#0)
+  > POST / HTTP/1.1
+  > Host: nic.example.com
+  > User-Agent: curl/7.68.0
+  > Accept: */*
+  >
+  * Mark bundle as not supporting multiuse
+  < HTTP/1.1 200 OK
+  < Server: nginx/1.21.6
+  < Date: Wed, 30 Nov 2022 12:37:24 GMT
+  < Content-Type: text/plain
+  < Content-Length: 12
+  < Connection: keep-alive
+  < X-Mesh-Request-ID: 3d4569c9fb09e210121aa3efca06ca85
+  <
+  target v1.0
+
+4行目で ``POST`` で通信が送付され、 10行目で ``200 OK`` 18行目で正しく応答が返されていることが確認できます
+
+制御対象のURL ポリシーに記述したPathの条件を満たすリクエストを送付します。
+
+.. code-block:: cmdin
+
+  curl -v -H "Host: nic.example.com" http://localhost/dummy/this-is-valid-path/a.jpg
+
+.. code-block:: bash
+  :linenos:
+  :caption: 実行結果サンプル
+  :emphasize-lines: 4,10,18
+
+  *   Trying 127.0.0.1:80...
+  * TCP_NODELAY set
+  * Connected to localhost (127.0.0.1) port 80 (#0)
+  > GET /dummy/this-is-valid-path/a.jpg HTTP/1.1
+  > Host: nic.example.com
+  > User-Agent: curl/7.68.0
+  > Accept: */*
+  >
+  * Mark bundle as not supporting multiuse
+  < HTTP/1.1 200 OK
+  < Server: nginx/1.21.6
+  < Date: Wed, 30 Nov 2022 12:38:02 GMT
+  < Content-Type: image/jpeg
+  < Content-Length: 12
+  < Connection: keep-alive
+  < X-Mesh-Request-ID: ef2205a2b89c70b653c642df14dc2f4d
+  <
+  target v2.0
+  * Connection #0 to host localhost left intact
+
+4行目で 指定のPATHに通信が送付され、 10行目で ``200 OK`` 18行目で正しく応答が返されていることが確認できます
+
+ポリシーに記述したCookieの条件を満たすリクエストを送付します。
+
+.. code-block:: cmdin
+
+  curl -v -H "Host: nic.example.com" http://localhost/ -H "X-Type: valid"
+
+.. code-block:: bash
+  :linenos:
+  :caption: 実行結果サンプル
+  :emphasize-lines: 4,10,19
+
+  *   Trying 127.0.0.1:80...
+  * TCP_NODELAY set
+  * Connected to localhost (127.0.0.1) port 80 (#0)
+  > GET / HTTP/1.1
+  > Host: nic.example.com
+  > User-Agent: curl/7.68.0
+  > Accept: */*
+  > X-Type: valid
+  >
+  * Mark bundle as not supporting multiuse
+  < HTTP/1.1 200 OK
+  < Server: nginx/1.21.6
+  < Date: Wed, 30 Nov 2022 12:38:41 GMT
+  < Content-Type: text/plain
+  < Content-Length: 12
+  < Connection: keep-alive
+  < X-Mesh-Request-ID: cc3e1e8df58f0a1200456d76a551f6c7
+  <
+  target v1.0
+
+8行目で指定したHTTP Headerが付与された通信が送付され、 11行目で ``200 OK`` 19行目で正しく応答が返されていることが確認できます
+
+このサンプル以上に条件に該当した場合に応答を返しそれ以外をエラーとしました。
+condition は様々な条件を記述することが可能です。該当する処理をエラーだけでなくリダイレクト、その他通信と違うServiceに転送するなどが可能となります
+
+3. 不要設定の削除
+----
+
+不要な設定を削除します
+
+.. code-block:: cmdin
+
+  ## cd ~/f5j-nginx-k8s-apigw-lab/example
+  kubectl delete -f acl-nic-vs/nic-vs-acl.yaml -n staging
+
+
+6. NSMによる条件に応じた制御
+====
+
+以下の構成で動作を確認します
+
+   .. image:: ./media/nsm-smi-acl.png
+      :width: 400
+
+``request_path`` , ``methods`` , ``headers`` による通信制御を確認します。
+詳細は以降の設定で確認しますが、SMIの記述では許可する条件を指定することが可能となります。
+``5. NICによる条件に応じた制御`` では条件に対して自由なActionを指定できましたが、その点が異なることを注意ください
+
+
+1. 設定のデプロイ
+----
+
+ここで実施するNSMのSMIによる通信制御では、Deploymentに指定されたServiceAccountを確認し、その送信元・送信先ServiceAccountを指定し通信を制御します。
+
+サービスアカウントを確認します
+
+.. code-block:: cmdin
+
+  kubectl get sa -n staging
+  NAME          SECRETS   AGE
+  default       1         6d9h
+  target-v1-0   1         11m
+  target-v2-0   1         14s
+  webapp        1         25s
+
+DeploymentのPod Templateで指定されている ``Service Account`` を確認します
+
+.. code-block:: cmdin
+
+  kubectl describe deployment -n staging | egrep 'Pod Template:|Service Account:|^Name:'
+  Name:                   target-v1-0
+  Pod Template:
+    Service Account:  target-v1-0
+  Name:                   target-v2-0
+  Pod Template:
+    Service Account:  target-v2-0
+  Name:                   webapp
+  Pod Template:
+    Service Account:  webapp
+
+設定の内容を確認します。VSの内容は `2. NSMのトラフィック分割(Canary Release) のNIC設定 <https://f5j-nginx-k8s-apigw.readthedocs.io/en/latest/class1/module03/module03.html#nsm-canary-release>`__ と同じであり大変シンプルな内容のため割愛します。
+
+NSMに指定するポリシーの内容を確認します。
+
+.. code-block:: cmdin
+
+  ## cd ~/f5j-nginx-k8s-apigw-lab/example
+  cat acl-nsm-smi/nsm-acl.yaml
+
+.. code-block:: bash
+  :linenos:
+  :caption: 実行結果サンプル
+  :emphasize-lines: 7-8,16-22
+
+  apiVersion: specs.smi-spec.io/v1alpha3
+  kind: HTTPRouteGroup
+  metadata:
+    name: route-group
+  spec:
+    matches:
+    - name: method
+      methods:
+      - POST
+    - name: path
+      pathRegex: "/.*valid.*"
+    - name: header
+      headers:
+        X-Type: "valid"
+
+  ---
+  apiVersion: access.smi-spec.io/v1alpha2
+  kind: TrafficTarget
+  metadata:
+    name: traffic-target-v1
+  spec:
+    destination:
+      kind: ServiceAccount
+      name: target-v1-0
+    rules:
+    - kind: HTTPRouteGroup
+      name: route-group
+      matches:
+      - method
+      - path
+      - header
+    sources:
+    - kind: ServiceAccount
+      name: webapp
+  
+  ---
+  apiVersion: access.smi-spec.io/v1alpha2
+  kind: TrafficTarget
+  metadata:
+    name: traffic-target-v2
+  spec:
+    destination:
+      kind: ServiceAccount
+      name: target-v2-0
+    rules:
+    - kind: HTTPRouteGroup
+      name: route-group
+      matches:
+      - method
+      - path
+      - header
+    sources:
+    - kind: ServiceAccount
+      name: webapp
+  
+
+- 1-14行目で、対象とする条件を指定します。kind は ``HTTPRouteGroup`` となり、オブジェクト名は ``route-group`` です
+- 条件は以下の三種類となります
+  
+  - 7-9行目: HTTP Method で ``POST`` を指定
+  - 10-11行目: path で ``"/.*valid.*"`` を指定し、 ``valid`` が含まれる pathを対象とする
+  - 12-14行目: HTTP Header を対象とし、 ``X-Type`` の値が ``valid`` となっているものを対象とする
+
+- 17-34行目が、 ``webapp`` から ``target-v1-0`` に対する設定、27-54行目が、 ``webapp`` から ``target-v2-0`` に対する設定となります
+- これらの違いは destination のみで、8行目で ``target-v1-0`` 、 28行目で ``target-v2-0`` を指定しています。その他の内容は同様です
+
+設定を反映します
+
+.. code-block:: cmdin
+
+  ## cd ~/f5j-nginx-k8s-apigw-lab/example
+  kubectl apply -f acl-nsm-smi/nic-vs-acl.yaml -n staging
+  kubectl apply -f acl-nsm-smi/nsm-acl.yaml -n staging
+
+
+2. 動作確認
+----
+
+動作を確認します
+
+まずシンプルなリクエストを送付し、結果を確認します
+
+.. code-block:: cmdin
+
+  curl -s -H "Host: webapp.example.com" http://localhost/
+
+.. code-block:: bash
+  :linenos:
+  :caption: 実行結果サンプル
+
+  <html>
+  <head><title>403 Forbidden</title></head>
+  <body>
+  <center><h1>403 Forbidden</h1></center>
+  <hr><center>nginx/1.21.6</center>
+  </body>
+  </html>
+
+通信を送付したところ ``403`` が応答されていることがわかります。curlコマンドではデフォルトのMethodがGETであり、指定したポリシーの条件に該当しないためエラーとなっています
+
+ポリシーに記述したMethodでリクエストを送付します。
+
+.. code-block:: cmdin
+
+  curl -v -H "Host: webapp.example.com" http://localhost/ -X POST
+
+.. code-block:: bash
+  :linenos:
+  :caption: 実行結果サンプル
+  :emphasize-lines: 4,10,19
+
+  *   Trying 127.0.0.1:80...
+  * TCP_NODELAY set
+  * Connected to localhost (127.0.0.1) port 80 (#0)
+  > POST / HTTP/1.1
+  > Host: webapp.example.com
+  > User-Agent: curl/7.68.0
+  > Accept: */*
+  >
+  * Mark bundle as not supporting multiuse
+  < HTTP/1.1 200 OK
+  < Server: nginx/1.21.6
+  < Date: Wed, 30 Nov 2022 11:54:06 GMT
+  < Content-Type: text/plain
+  < Content-Length: 12
+  < Connection: keep-alive
+  < X-Mesh-Request-ID: 4a64156f62a3a613671af6e6650b9ac5
+  < X-Mesh-Request-ID: 1df02eadd498d94aaaa0db3d76b901a3
+  <
+  target v1.0
+  * Connection #0 to host localhost left intact
+
+4行目で ``POST`` で通信が送付され、 10行目で ``200 OK`` 19行目で正しく応答が返されていることが確認できます
+
+ポリシーに記述したPathの条件を満たすリクエストを送付します。
+
+.. code-block:: cmdin
+
+  curl -v -H "Host: webapp.example.com" http://localhost/dummy/this-is-valid-path/a.jpg
+
+.. code-block:: bash
+  :linenos:
+  :caption: 実行結果サンプル
+  :emphasize-lines: 4,10,19
+
+  *   Trying 127.0.0.1:80...
+  * TCP_NODELAY set
+  * Connected to localhost (127.0.0.1) port 80 (#0)
+  > GET /dummy/this-is-valid-path/a.jpg HTTP/1.1
+  > Host: webapp.example.com
+  > User-Agent: curl/7.68.0
+  > Accept: */*
+  >
+  * Mark bundle as not supporting multiuse
+  < HTTP/1.1 200 OK
+  < Server: nginx/1.21.6
+  < Date: Wed, 30 Nov 2022 11:58:30 GMT
+  < Content-Type: image/jpeg
+  < Content-Length: 12
+  < Connection: keep-alive
+  < X-Mesh-Request-ID: 0fa1636fee4c962e79fc7091bdb47e01
+  < X-Mesh-Request-ID: 53d69013d169237c948b2a1ca0962428
+  <
+  target v2.0
+
+4行目で 指定のPATHに通信が送付され、 10行目で ``200 OK`` 19行目で正しく応答が返されていることが確認できます
+
+ポリシーに記述したCookieの条件を満たすリクエストを送付します。
+
+.. code-block:: cmdin
+
+  curl -v -H "Host: webapp.example.com" http://localhost/ -H "X-Type: valid"
+
+.. code-block:: bash
+  :linenos:
+  :caption: 実行結果サンプル
+  :emphasize-lines: 8,11,20
+
+  *   Trying 127.0.0.1:80...
+  * TCP_NODELAY set
+  * Connected to localhost (127.0.0.1) port 80 (#0)
+  > GET / HTTP/1.1
+  > Host: webapp.example.com
+  > User-Agent: curl/7.68.0
+  > Accept: */*
+  > X-Type: valid
+  >
+  * Mark bundle as not supporting multiuse
+  < HTTP/1.1 200 OK
+  < Server: nginx/1.21.6
+  < Date: Wed, 30 Nov 2022 11:59:23 GMT
+  < Content-Type: text/plain
+  < Content-Length: 12
+  < Connection: keep-alive
+  < X-Mesh-Request-ID: aa232231e3b082bd8487a907ec3d8e32
+  < X-Mesh-Request-ID: 103858cec23cdc936331e4009aa20759
+  <
+  target v1.0
+  * Connection #0 to host localhost left intact
+
+8行目で指定したHTTP Headerが付与された通信が送付され、 11行目で ``200 OK`` 20行目で正しく応答が返されていることが確認できます
+
+この様にコンテナ内部の通信に対して、Deploymentに指定したService Accountを使って通信の制御を行うことが可能です
+
+3. 不要設定の削除
+----
+
+不要な設定を削除します
+
+.. code-block:: cmdin
+
+  ## cd ~/f5j-nginx-k8s-apigw-lab/example
+  kubectl delete -f acl-nsm-smi/nic-vs-acl.yaml -n staging
+  kubectl delete -f acl-nsm-smi/nsm-acl.yaml -n staging
