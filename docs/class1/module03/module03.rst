@@ -1,4 +1,4 @@
-APIGW通信制御の実施
+APIGW 通信制御の実施
 ####
 
 1. NICのトラフィック分割(Canary Release)
