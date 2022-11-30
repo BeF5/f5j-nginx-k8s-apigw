@@ -57,7 +57,7 @@ Helm とは
    .. image:: ./media/helm-structure.jpg
       :width: 400
 
-このラボでは、NGINX Ingress Controller、NGINX Service Mesh、各種監視コンポーネントをHelmを使ってデプロイします
+このラボでは、NGINX Ingress Controller(NIC)、NGINX Service Mesh(NSM)、各種監視コンポーネントをHelmを使ってデプロイします
 
 
 デプロイする構成について
