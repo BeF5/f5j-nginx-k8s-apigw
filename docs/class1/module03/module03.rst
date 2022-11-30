@@ -174,11 +174,6 @@ STATEが ``Valid`` であることを確認します
 .. code-block:: cmdin
 
   ## cd ~/f5j-nginx-k8s-apigw-lab/example
-
-.. code-block:: bash
-  :linenos:
-  :caption: 実行結果サンプル
-
   kubectl apply -f split-nic-vs/nic-vs-split2.yaml -n staging
 
 正しく反映されたことを確認します
@@ -292,11 +287,6 @@ NICの設定内容は大変シンプルで、後段の ``webapp-svc`` へ転送�
 .. code-block:: cmdin
 
   ## cd ~/f5j-nginx-k8s-apigw-lab/example
-
-.. code-block:: bash
-  :linenos:
-  :caption: 実行結果サンプル
-
   kubectl apply -f split-nsm-smi/nic-vs-nsmsplit.yaml -n staging
 
 正しく反映されたことを確認します
