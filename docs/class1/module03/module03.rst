@@ -58,11 +58,6 @@ NICの背後にあるアプリケーションのトラフィック分割が求�
 .. code-block:: cmdin
 
   ## cd ~/f5j-nginx-k8s-apigw-lab/example
-
-.. code-block:: bash
-  :linenos:
-  :caption: 実行結果サンプル
-
   kubectl apply -f split-nic-vs/nic-vs-split1.yaml -n staging
 
 正しく反映されたことを確認します
