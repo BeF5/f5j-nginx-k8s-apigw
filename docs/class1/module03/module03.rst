@@ -1075,7 +1075,7 @@ condition は様々な条件を記述することが可能です。該当する�
       :width: 400
 
 ``request_path`` , ``methods`` , ``headers`` による通信制御を確認します。
-詳細は以降の設定で確認しますが、SMIの記述では許可する条件を指定することが可能となります。
+詳細は以降の設定で確認しますが、SMIの記述では ``許可する条件`` を指定することが可能となります。
 ``5. NICによる条件に応じた制御`` では条件に対して自由なActionを指定できましたが、その点が異なることを注意ください
 
 
@@ -1089,6 +1089,12 @@ condition は様々な条件を記述することが可能です。該当する�
 .. code-block:: cmdin
 
   kubectl get sa -n staging
+
+.. code-block:: bash
+  :linenos:
+  :caption: 実行結果サンプル
+  :emphasize-lines: 3-5
+
   NAME          SECRETS   AGE
   default       1         6d9h
   target-v1-0   1         11m
@@ -1100,6 +1106,12 @@ DeploymentのPod Templateで指定されている ``Service Account`` を確認�
 .. code-block:: cmdin
 
   kubectl describe deployment -n staging | egrep 'Pod Template:|Service Account:|^Name:'
+
+.. code-block:: bash
+  :linenos:
+  :caption: 実行結果サンプル
+  :emphasize-lines: 3,6,9
+
   Name:                   target-v1-0
   Pod Template:
     Service Account:  target-v1-0
@@ -1109,6 +1121,9 @@ DeploymentのPod Templateで指定されている ``Service Account`` を確認�
   Name:                   webapp
   Pod Template:
     Service Account:  webapp
+
+各Deploymentに対し、それぞれService Accountが指定されていることが確認できます。
+
 
 設定の内容を確認します。VSの内容は `2. NSMのトラフィック分割(Canary Release) のNIC設定 <https://f5j-nginx-k8s-apigw.readthedocs.io/en/latest/class1/module03/module03.html#nsm-canary-release>`__ と同じであり大変シンプルな内容のため割愛します。
 
@@ -1122,7 +1137,6 @@ NSMに指定するポリシーの内容を確認します。
 .. code-block:: bash
   :linenos:
   :caption: 実行結果サンプル
-  :emphasize-lines: 7-8,16-22
 
   apiVersion: specs.smi-spec.io/v1alpha3
   kind: HTTPRouteGroup
@@ -1179,6 +1193,7 @@ NSMに指定するポリシーの内容を確認します。
     - kind: ServiceAccount
       name: webapp
   
+  :emphasize-lines: 7-14,24,28-30,44,48-50
 
 - 1-14行目で、対象とする条件を指定します。kind は ``HTTPRouteGroup`` となり、オブジェクト名は ``route-group`` です
 - 条件は以下の三種類となります
@@ -1188,7 +1203,7 @@ NSMに指定するポリシーの内容を確認します。
   - 12-14行目: HTTP Header を対象とし、 ``X-Type`` の値が ``valid`` となっているものを対象とする
 
 - 17-34行目が、 ``webapp`` から ``target-v1-0`` に対する設定、27-54行目が、 ``webapp`` から ``target-v2-0`` に対する設定となります
-- これらの違いは destination のみで、8行目で ``target-v1-0`` 、 28行目で ``target-v2-0`` を指定しています。その他の内容は同様です
+- これらの違いは destination のみで、24行目で ``target-v1-0`` 、 44行目で ``target-v2-0`` を指定しています。その他の内容は同様です
 
 設定を反映します
 
