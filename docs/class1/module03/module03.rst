@@ -1338,3 +1338,817 @@ NSMに指定するポリシーの内容を確認します。
   ## cd ~/f5j-nginx-k8s-apigw-lab/example
   kubectl delete -f acl-nsm-smi/nic-vs-acl.yaml -n staging
   kubectl delete -f acl-nsm-smi/nsm-acl.yaml -n staging
+
+
+7. NICのCircuit Breaker (Passive Health Check)
+====
+
+まずCircuit Breakerの機能について説明します。Kubernetes環境等でデプロイされる昨今のWebサービスは、機能ごとにサービスが分割され、APIで接続している場合があります。
+
+   .. image:: ./media/circuit-breaker1.png
+      :width: 400
+
+サービス内で障害がした際に、その障害が連続的に伝播し、サービス全体に影響が及ぶ状態となる可能性があります。
+
+   .. image:: ./media/circuit-breaker2.png
+      :width: 400
+
+Circuit Breakerは、この障害の初期の時点で適切なフォールバックなどを実施することにより、サービス全体の停止や障害規模の拡大を防ぐことを目的とした機能です。
+
+   .. image:: ./media/circuit-breaker3.png
+      :width: 400
+
+Circuit Breakerの動作を確認します。以下の構成で動作を確認します
+
+   .. image:: ./media/nic-vs-cb.png
+      :width: 400
+
+- NICで転送先サービスの状態を監視します
+- エラーと判定された場合に、別のサービスへリダイレクトします
+- ``target-v2-0-timeout`` と ``target-v2-0-rst`` を用意しそれぞれの動作を確認します
+
+1. サンプルアプリケーションのデプロイ
+----
+
+エラーを発生させるため、サンプルアプリケーションをデプロイします。
+
+.. code-block:: cmdin
+
+  ## cd ~/f5j-nginx-k8s-apigw-lab/example
+  kubectl replace --force -f sample-app/target-v2.0-fail.yaml -n staging
+
+デプロイしたアプリケーションの状態を確認します
+
+.. code-block:: cmdin
+
+  kubectl get svc,pod -n staging
+
+.. code-block:: bash
+  :linenos:
+  :caption: 実行結果サンプル
+  :emphasize-lines: 5-6,11,3,10
+
+  NAME                          TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)   AGE
+  service/target-svc            ClusterIP   10.106.239.184   <none>        80/TCP    9m56s
+  service/target-v1-0           ClusterIP   10.108.92.55     <none>        80/TCP    132m
+  service/target-v2-0           ClusterIP   10.97.187.172    <none>        80/TCP    90m
+  service/target-v2-0-rst       ClusterIP   10.111.46.119    <none>        81/TCP    3s
+  service/target-v2-0-timeout   ClusterIP   10.108.182.110   <none>        80/TCP    4s
+  service/webapp-svc            ClusterIP   10.106.222.191   <none>        80/TCP    52s
+  
+  NAME                               READY   STATUS            RESTARTS   AGE
+  pod/target-v1-0-6bc4b7d57f-klwk6   2/2     Running           0          132m
+  pod/target-v2-0-847595548b-jbn5b   2/2     Running           0          4s
+  pod/webapp-578d87f489-fjhvn        2/2     Running           0          52s
+
+
+
+2. NIC設定のデプロイ・動作確認
+----
+
+まずは、通信を転送しエラーとなることを確認します。
+
+NICに適用する設定の内容を確認します
+
+.. code-block:: cmdin
+
+  ## cd ~/f5j-nginx-k8s-apigw-lab/example
+  cat cb-passive-nic-vs/nic-vs-cb1.yaml
+
+.. code-block:: bash
+  :linenos:
+  :caption: 実行結果サンプル
+  :emphasize-lines: 14-19,26,29,23
+
+  apiVersion: k8s.nginx.org/v1
+  kind: VirtualServer
+  metadata:
+    name: nic
+  spec:
+    host: nic.example.com
+    upstreams:
+    - name: target-v1
+      service: target-v1-0
+      port: 80
+    - name: target-v2-timeout
+      service: target-v2-0-timeout
+      port: 80
+      fail-timeout: 20s
+      max-fails: 1
+      connect-timeout: 2s
+      send-timeout: 2s
+      read-timeout: 2s
+    - name: target-v2-rst
+      service: target-v2-0-rst
+      port: 81
+    routes:
+    - path: /v1
+      action:
+        pass: target-v1
+    - path: /v2-timeout
+      action:
+        pass: target-v2-timeout
+    - path: /v2-rst
+      action:
+        pass: target-v2-rst
+
+- 14-19行目に、upstream ``target-v2-timeout`` に対する、 ``Passive HealthCheck`` を設定しています
+- 16-19行目に、各種タイムアウト値を指定しています
+- パラメータの詳細は `VS/VSR Upstream <https://docs.nginx.com/nginx-ingress-controller/configuration/virtualserver-and-virtualserverroute-resources/#upstream>`__ を参照してください
+- 23行目で、 ``/v1`` の場合 ``target-v1`` への転送、 26行目で、 ``/v2-timeout`` の場合 ``target-v2-timeout`` への転送、29行目で、 ``/v2-rst`` の場合 ``target-v2-rst`` への転送を設定しています
+
+
+設定を反映します
+
+.. code-block:: cmdin
+
+kubectl apply -f cb-passive-nic-vs/nic-vs-cb1.yaml -n staging 
+
+
+それぞれの動作確認を行います
+
+アプリケーションがエラーとならない ``/v1`` 宛の通信を確認します
+
+.. code-block:: cmdin
+
+  curl -v -H "Host: nic.example.com" http://localhost/v1
+
+.. code-block:: bash
+  :linenos:
+  :caption: 実行結果サンプル
+
+  *   Trying 127.0.0.1:80...
+  * TCP_NODELAY set
+  * Connected to localhost (127.0.0.1) port 80 (#0)
+  > GET /v1 HTTP/1.1
+  > Host: nic.example.com
+  > User-Agent: curl/7.68.0
+  > Accept: */*
+  >
+  * Mark bundle as not supporting multiuse
+  < HTTP/1.1 200 OK
+  < Server: nginx/1.21.6
+  < Date: Wed, 28 Dec 2022 04:06:28 GMT
+  < Content-Type: text/plain
+  < Content-Length: 12
+  < Connection: keep-alive
+  < X-Mesh-Request-ID: 5ee860e2d2437c81304a4503bfa0db35
+  <
+  target v1.0
+  * Connection #0 to host localhost left intact
+
+期待の通り ``200 OK`` が応答され、正しくレスポンスの文字列 ``target v1.0`` が表示されています
+
+アプリケーションがタイムアウトする ``/v2-timeout`` 宛の通信を確認します
+
+.. code-block:: cmdin
+
+  date; curl -v -H "Host: nic.example.com" http://localhost/v2-timeout; date
+
+.. code-block:: bash
+  :linenos:
+  :caption: 実行結果サンプル
+  :emphasize-lines: 1,26,11,19
+
+  Wed Dec 28 04:06:34 UTC 2022
+  *   Trying 127.0.0.1:80...
+  * TCP_NODELAY set
+  * Connected to localhost (127.0.0.1) port 80 (#0)
+  > GET /v2-timeout HTTP/1.1
+  > Host: nic.example.com
+  > User-Agent: curl/7.68.0
+  > Accept: */*
+  >
+  * Mark bundle as not supporting multiuse
+  < HTTP/1.1 504 Gateway Time-out
+  < Server: nginx/1.21.6
+  < Date: Wed, 28 Dec 2022 04:06:36 GMT
+  < Content-Type: text/html
+  < Content-Length: 167
+  < Connection: keep-alive
+  <
+  <html>
+  <head><title>504 Gateway Time-out</title></head>
+  <body>
+  <center><h1>504 Gateway Time-out</h1></center>
+  <hr><center>nginx/1.21.6</center>
+  </body>
+  </html>
+  * Connection #0 to host localhost left intact
+  Wed Dec 28 04:06:36 UTC 2022
+
+- 19行目に、 ``504 Gateway Time-out`` と応答されることが確認できます
+- 1行目と26行目の時間を比較し、curlコマンド実行前後の時間を確認すると約2秒であることが確認できます。これは先程確認したNICの設定のタイムアウト値と同様となっています
+
+
+アプリケーションがRSTを返す ``/v2-rst`` 宛の通信を確認します
+
+.. code-block:: cmdin
+
+  curl -v -H "Host: nic.example.com" http://localhost/v2-rst
+
+.. code-block:: bash
+  :linenos:
+  :caption: 実行結果サンプル
+  :emphasize-lines: 10,18
+
+  *   Trying 127.0.0.1:80...
+  * TCP_NODELAY set
+  * Connected to localhost (127.0.0.1) port 80 (#0)
+  > GET /v2-rst HTTP/1.1
+  > Host: nic.example.com
+  > User-Agent: curl/7.68.0
+  > Accept: */*
+  >
+  * Mark bundle as not supporting multiuse
+  < HTTP/1.1 502 Bad Gateway
+  < Server: nginx/1.21.6
+  < Date: Wed, 28 Dec 2022 04:07:13 GMT
+  < Content-Type: text/html
+  < Content-Length: 157
+  < Connection: keep-alive
+  <
+  <html>
+  <head><title>502 Bad Gateway</title></head>
+  <body>
+  <center><h1>502 Bad Gateway</h1></center>
+  <hr><center>nginx/1.21.6</center>
+  </body>
+  </html>
+  * Connection #0 to host localhost left intact
+
+- 18行目に、 ``502 Bad Gateway`` と応答されることが確認できます
+
+
+3. CircuitBreakerのデプロイ・動作確認
+----
+
+エラーに対し、フォールバックを行うためフォールバックの設定を行います。
+
+.. code-block:: cmdin
+
+  ## cd ~/f5j-nginx-k8s-apigw-lab/example
+  cat cb-passive-nic-vs/nic-vs-cb2.yaml
+
+.. code-block:: bash
+  :linenos:
+  :caption: 実行結果サンプル
+  :emphasize-lines: 29-33, 35-37
+
+  apiVersion: k8s.nginx.org/v1
+  kind: VirtualServer
+  metadata:
+    name: nic
+  spec:
+    host: nic.example.com
+    upstreams:
+    - name: target-v1
+      service: target-v1-0
+      port: 80
+    - name: target-v2-timeout
+      service: target-v2-0-timeout
+      port: 80
+      fail-timeout: 20s
+      max-fails: 1
+      connect-timeout: 2s
+      send-timeout: 2s
+      read-timeout: 2s
+    - name: target-v2-rst
+      service: target-v2-0-rst
+      port: 81
+    routes:
+    - path: /v1
+      action:
+        pass: target-v1
+    - path: /v2-timeout
+      action:
+        pass: target-v2-timeout
+      errorPages:
+      - codes: [504]
+        redirect:
+          code: 301
+          url: ${scheme}://nic.example.com/v1
+    - path: /v2-rst
+      location-snippets: |
+        error_page 502 =302 "${scheme}://${host}/v1?${args}";
+        proxy_intercept_errors on;
+      action:
+
+
+- 29-33行目に、 ``errorPage`` を指定します。このパラメータにより、対象のエラーコード(504)の場合の挙動を指定することができます。ここでは指定のパラメータでリダイレクトするよう指定しています
+- 35-37行目は、 ``location-snippets`` でNGINXの設定を指定します。29-33行目の記述と比較し、より詳細なパラメータの指定が必要となる場合にはこのようにコンフィグを記述することが可能です
+- ``errorPage`` のパラメータの詳細は `VS/VSR ErrorPage <https://docs.nginx.com/nginx-ingress-controller/configuration/virtualserver-and-virtualserverroute-resources/#errorpage>`__ を参照してください
+- location-snipetsで記述した各Directiveの詳細は `error_page <http://nginx.org/en/docs/http/ngx_http_core_module.html#error_page>`__ 、  
+`proxy_intercept_errors <http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_intercept_errors>`__ を参照してください
+
+設定をデプロイします
+
+.. code-block:: cmdin
+
+  kubectl apply -f cb-passive-nic-vs/nic-vs-cb2.yaml -n staging 
+
+動作確認を行います
+
+アプリケーションがタイムアウトする ``/v2-timeout`` 宛の通信を確認します
+
+.. code-block:: cmdin
+
+  date; curl -v -H "Host: nic.example.com" http://localhost/v2-timeout; date
+
+.. code-block:: bash
+  :linenos:
+  :caption: 実行結果サンプル
+  :emphasize-lines: 1,87,11,20
+
+  Wed Dec 28 04:17:25 UTC 2022
+  *   Trying 127.0.0.1:80...
+  * TCP_NODELAY set
+  * Connected to localhost (127.0.0.1) port 80 (#0)
+  > GET /v2-timeout HTTP/1.1
+  > Host: nic.example.com
+  > User-Agent: curl/7.68.0
+  > Accept: */*
+  >
+  * Mark bundle as not supporting multiuse
+  < HTTP/1.1 301 Moved Permanently
+  < Server: nginx/1.21.6
+  < Date: Wed, 28 Dec 2022 04:17:27 GMT
+  < Content-Type: text/html
+  < Content-Length: 169
+  < Connection: keep-alive
+  < Location: http://nic.example.com/v1
+  <
+  <html>
+  <head><title>301 Moved Permanently</title></head>
+  <body>
+  <center><h1>301 Moved Permanently</h1></center>
+  <hr><center>nginx/1.21.6</center>
+  </body>
+  </html>
+  * Connection #0 to host localhost left intact
+  Wed Dec 28 04:17:27 UTC 2022
+
+- ``504 Gateway Time-out`` に変わり、 ``301 Moved Permanently`` が応答されることが確認できます。
+- レスポンスヘッダーの ``Location`` の値を確認すると、 ``http://nic.example.com/v1`` となっていることが確認できます
+
+アプリケーションがRSTを返す ``/v2-rst`` 宛の通信を確認します
+
+.. code-block:: cmdin
+
+  curl -v -H "Host: nic.example.com" "http://localhost/v2-rst?a=1&b=2"
+
+.. code-block:: bash
+  :linenos:
+  :caption: 実行結果サンプル
+  :emphasize-lines: 10,19
+
+  *   Trying 127.0.0.1:80...
+  * TCP_NODELAY set
+  * Connected to localhost (127.0.0.1) port 80 (#0)
+  > GET /v2-rst?a=1&b=2 HTTP/1.1
+  > Host: nic.example.com
+  > User-Agent: curl/7.68.0
+  > Accept: */*
+  >
+  * Mark bundle as not supporting multiuse
+  < HTTP/1.1 302 Moved Temporarily
+  < Server: nginx/1.21.6
+  < Date: Wed, 28 Dec 2022 04:20:16 GMT
+  < Content-Type: text/html
+  < Content-Length: 145
+  < Connection: keep-alive
+  < Location: http://nic.example.com/v1?a=1&b=2
+  <
+  <html>
+  <head><title>302 Found</title></head>
+  <body>
+  <center><h1>302 Found</h1></center>
+  <hr><center>nginx/1.21.6</center>
+  </body>
+  </html>
+  * Connection #0 to host localhost left intact
+
+- ``502 Bad Gateway`` に変わり、 ``302 Found`` が応答されることが確認できます。
+- レスポンスヘッダーの ``Location`` の値を確認すると、 ``http://nic.example.com/v1?a=1&b=2`` となり、設定の通りArgsの値を取得しリダイレクトしていることが確認できます
+
+4. 不要設定の削除
+----
+
+不要な設定を削除します
+
+.. code-block:: cmdin
+
+  ## cd ~/f5j-nginx-k8s-apigw-lab/example
+  kubectl delete -f cb-passive-nic-vs/nic-vs-cb2.yaml -n staging
+  kubectl delete --force -f sample-app/target-v2.0-fail.yaml -n staging
+  kubectl apply -f sample-app/target-v2.0-successful.yaml -n staging
+
+7. NICのCircuit Breaker (Active Health Check)
+====
+
+RSTの場合には即座にエラーコードに合わせた処理を実施していますが、
+タイムアウトが発生した場合には、設定値に応じた待ち時間が発生します。
+
+クライアントの通信が発生する前に、NICがアプリケーションの状態を能動的に確認する機能がアクティブヘルスチェックとなります
+
+
+1. サンプルアプリケーションのデプロイ
+----
+
+`6. <>`__ で利用したサンプルアプリケーションをデプロイします
+
+サンプルアプリケーションをデプロイします。
+
+.. code-block:: cmdin
+
+  ## cd ~/f5j-nginx-k8s-apigw-lab/example
+  kubectl replace --force -f sample-app/target-v2.0-fail.yaml -n staging
+
+.. code-block:: cmdin
+
+  kubectl get svc,pod -n staging
+
+.. code-block:: bash
+  :linenos:
+  :caption: 実行結果サンプル
+  :emphasize-lines: 5-6,11
+
+  NAME                          TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)   AGE
+  service/target-svc            ClusterIP   10.106.239.184   <none>        80/TCP    9m56s
+  service/target-v1-0           ClusterIP   10.108.92.55     <none>        80/TCP    132m
+  service/target-v2-0           ClusterIP   10.97.187.172    <none>        80/TCP    90m
+  service/target-v2-0-rst       ClusterIP   10.111.46.119    <none>        81/TCP    3s
+  service/target-v2-0-timeout   ClusterIP   10.108.182.110   <none>        80/TCP    4s
+  service/webapp-svc            ClusterIP   10.106.222.191   <none>        80/TCP    52s
+  
+  NAME                               READY   STATUS            RESTARTS   AGE
+  pod/target-v1-0-6bc4b7d57f-klwk6   2/2     Running           0          132m
+  pod/target-v2-0-847595548b-jbn5b   2/2     Running           0          4s
+  pod/webapp-578d87f489-fjhvn        2/2     Running           0          52s
+
+2. NICの設定をデプロイ
+----
+
+内容を確認します
+
+.. code-block:: cmdin
+
+  ## cd ~/f5j-nginx-k8s-apigw-lab/example
+  cat cb-active-nic-vs/nic-vs-act-cb.yaml
+
+.. code-block:: bash
+  :linenos:
+  :caption: 実行結果サンプル
+  :emphasize-lines: 14-22,31-35
+
+  apiVersion: k8s.nginx.org/v1
+  kind: VirtualServer
+  metadata:
+    name: nic
+  spec:
+    host: nic.example.com
+    upstreams:
+    - name: target-v1
+      service: target-v1-0
+      port: 80
+    - name: target-v2-timeout
+      service: target-v2-0-timeout
+      port: 80
+      healthCheck:
+        enable: true
+        interval: 5s
+        fails: 3
+        passes: 3
+        port: 80
+        statusMatch: "! 400-599"
+    - name: target-v2-rst
+      service: target-v2-0-rst
+      port: 81
+    routes:
+    - path: /v1
+      action:
+        pass: target-v1
+    - path: /v2-timeout
+      action:
+        pass: target-v2-timeout
+      errorPages:
+      - codes: [502]
+        redirect:
+          code: 301
+          url: ${scheme}://nic.example.com/v1
+
+設定をデプロイします
+
+.. code-block:: cmdin
+
+  kubectl apply -f cb-active-nic-vs/nic-vs-act-cb.yaml -n staging 
+
+設定のデプロイ後、10秒ほど経過した後、NICのログを確認します
+
+.. code-block:: cmdin
+
+  kubectl logs nic1-nginx-ingress-6764d84695-89ldh -n nginx-ingress --tail=10 | grep -a3 unhealthy
+
+.. code-block:: bash
+  :linenos:
+  :caption: 実行結果サンプル
+  :emphasize-lines: 4
+
+  2022/12/28 04:28:55 [notice] 21#21: signal 17 (SIGCHLD) received from 620
+  2022/12/28 04:28:55 [notice] 21#21: worker process 620 exited with code 0
+  2022/12/28 04:28:55 [notice] 21#21: signal 29 (SIGIO) received
+  2022/12/28 04:29:04 [warn] 625#625: peer is unhealthy while checking status code, health check "vs_staging_nic_target-v2-timeout_match" of peer 192.168.127.29:80 in upstream "vs_staging_nic_target-v2-timeout", port 80
+
+3行目が設定の反映に関するログとなります。その約10秒後に、healthcheckで ``unhealthy`` となったことが記録されています
+
+3. 動作確認
+----
+
+動作確認を行います
+
+.. code-block:: cmdin
+
+  date; curl -v -H "Host: nic.example.com" http://localhost/v2-timeout; date
+
+.. code-block:: bash
+  :linenos:
+  :caption: 実行結果サンプル
+  :emphasize-lines: 1,87,11,20
+
+  Wed Dec 28 04:31:33 UTC 2022
+  *   Trying 127.0.0.1:80...
+  * TCP_NODELAY set
+  * Connected to localhost (127.0.0.1) port 80 (#0)
+  > GET /v2-timeout HTTP/1.1
+  > Host: nic.example.com
+  > User-Agent: curl/7.68.0
+  > Accept: */*
+  >
+  * Mark bundle as not supporting multiuse
+  < HTTP/1.1 301 Moved Permanently
+  < Server: nginx/1.21.6
+  < Date: Wed, 28 Dec 2022 04:31:33 GMT
+  < Content-Type: text/html
+  < Content-Length: 169
+  < Connection: keep-alive
+  < Location: http://nic.example.com/v1
+  <
+  <html>
+  <head><title>301 Moved Permanently</title></head>
+  <body>
+  <center><h1>301 Moved Permanently</h1></center>
+  <hr><center>nginx/1.21.6</center>
+  </body>
+  </html>
+  * Connection #0 to host localhost left intact
+  Wed Dec 28 04:31:33 UTC 2022
+
+リダイレクトの内容は `6. <>`__ の手順と同様です。先程と異なりタイムアウトなく即座にリダイレクトしていることが確認できます
+
+4. 不要設定の削除
+----
+
+不要な設定を削除します
+
+.. code-block:: cmdin
+
+  ## cd ~/f5j-nginx-k8s-apigw-lab/example
+  kubectl delete -f cb-passive-nic-vs/nic-vs-cb2.yaml -n staging
+  kubectl delete --force -f sample-app/target-v2.0-fail.yaml -n staging
+  kubectl apply -f sample-app/target-v2.0-successful.yaml -n staging
+
+8. NSMのCircuit Breaker
+====
+
+Circuit Breakerの機能については `7. NICのCircuit Breaker <>`__ の内容を確認してください
+
+NSMのCircuit Breakerの動作を確認します。以下の構成で動作を確認します
+
+   .. image:: ./media/nsm-cb.png
+      :width: 400
+
+- 通信の中継を行う ``webapp`` の転送先を ``target-v2-0-rst`` のみに変更します
+- ``target-v2-0-rst`` は `6. <>`__ の通りRSTを返すアプリケーションが動作します
+- NSMは通信のエラーを判定した場合に、別のサービスへフォールバックします
+
+1. サンプルアプリケーションをデプロイ
+----
+
+サンプルアプリケーションをデプロイします。
+
+.. code-block:: cmdin
+
+  kubectl replace --force -f sample-app/target-v2.0-fail.yaml -n staging
+  kubectl replace --force -f sample-app/webapp-gw-targetv2.yaml -n staging
+
+.. code-block:: cmdin
+
+  kubectl get svc,pod -n staging
+
+.. code-block:: bash
+  :linenos:
+  :caption: 実行結果サンプル
+  :emphasize-lines: 5-7,11-12
+
+  NAME                          TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)   AGE
+  service/target-svc            ClusterIP   10.106.239.184   <none>        80/TCP    62m
+  service/target-v1-0           ClusterIP   10.108.92.55     <none>        80/TCP    3h5m
+  service/target-v2-0           ClusterIP   10.97.187.172    <none>        80/TCP    143m
+  service/target-v2-0-rst       ClusterIP   10.105.133.134   <none>        81/TCP    10s
+  service/target-v2-0-timeout   ClusterIP   10.99.212.248    <none>        80/TCP    10s
+  service/webapp-svc            ClusterIP   10.111.198.141   <none>        80/TCP    7s
+  
+  NAME                               READY   STATUS    RESTARTS   AGE
+  pod/target-v1-0-6bc4b7d57f-klwk6   2/2     Running   0          3h5m
+  pod/target-v2-0-847595548b-85z7r   2/2     Running   0          10s
+  pod/webapp-578d87f489-89hwz        2/2     Running   0          7s
+
+
+2. NIC設定のデプロイ・動作確認
+----
+
+設定の内容を確認します
+
+NICは特殊な設定は行わず、シンプルな通信制御の内容となります
+
+.. code-block:: cmdin
+
+  cat cb-nsm-smi/nic-vs-cb.yaml
+
+.. code-block:: bash
+  :linenos:
+  :caption: 実行結果サンプル
+
+  apiVersion: k8s.nginx.org/v1
+  kind: VirtualServer
+  metadata:
+    name: webapp
+  spec:
+    host: webapp.example.com
+    upstreams:
+    - name: webapp-svc
+      service: webapp-svc
+      port: 80
+    routes:
+    - path: /
+      action:
+        pass: webapp-svc
+
+設定をデプロイします
+
+.. code-block:: cmdin
+
+  kubectl apply -f cb-nsm-smi/nic-vs-cb.yaml -n staging
+   
+.. code-block:: cmdin
+
+  kubectl get vs webapp -n staging
+
+.. code-block:: bash
+  :linenos:
+  :caption: 実行結果サンプル
+
+  NAME     STATE   HOST                 IP    PORTS   AGE
+  webapp   Valid   webapp.example.com                 40s
+
+
+.. code-block:: cmdin
+
+  curl -v -H "Host: webapp.example.com" http://localhost/
+
+.. code-block:: bash
+  :linenos:
+  :caption: 実行結果サンプル
+  :emphasize-lines: 10,19
+
+  *   Trying 127.0.0.1:80...
+  * TCP_NODELAY set
+  * Connected to localhost (127.0.0.1) port 80 (#0)
+  > GET / HTTP/1.1
+  > Host: webapp.example.com
+  > User-Agent: curl/7.68.0
+  > Accept: */*
+  >
+  * Mark bundle as not supporting multiuse
+  < HTTP/1.1 502 Bad Gateway
+  < Server: nginx/1.21.6
+  < Date: Wed, 28 Dec 2022 04:39:41 GMT
+  < Content-Type: text/html
+  < Content-Length: 157
+  < Connection: keep-alive
+  <
+  <html>
+  <head><title>502 Bad Gateway</title></head>
+  <body>
+  <center><h1>502 Bad Gateway</h1></center>
+  <hr><center>nginx/1.21.6</center>
+  </body>
+  </html>
+  * Connection #0 to host localhost left intact
+
+エラーが表示されることが確認できます
+
+2. CircuitBreaker(NSM)のデプロイ・動作確認
+----
+
+NSMに適用するCircuit Breakerの設定を確認します
+
+.. code-block:: cmdin
+
+  ## cd ~/f5j-nginx-k8s-apigw-lab/example
+  cat cb-nsm-smi/nsm-smi-cb.yaml
+
+.. code-block:: bash
+  :linenos:
+  :caption: 実行結果サンプル
+  :emphasize-lines: 1-2,6-14
+
+  apiVersion: specs.smi.nginx.com/v1alpha1
+  kind: CircuitBreaker
+  metadata:
+    name: circuit-breaker
+  spec:
+    destination:
+      kind: Service
+      name: target-v2-0-rst
+      namespace: staging
+    errors: 1
+    timeoutSeconds: 5
+    fallback:
+      service: staging/target-v1-0
+      port: 80
+
+- 2行目の通り、 ``kind: CircuitBreaker`` を設定しています
+- 6-9行目で、CircuitBreakerの対象の宛先を指定します
+- 10-11行目で、CircuitBreaker発生の条件を指定します
+- 12-14行目で、フォールバックする先のサービスを指定します
+- この例では、 ``target-v2-0-rst`` でエラーとなった場合に ``staging/target-v1-0:80`` にフォールバックする設定となります
+
+.. code-block:: cmdin
+
+  kubectl apply -f cb-nsm-smi/nsm-smi-cb.yaml -n staging 
+
+正しく設定が反映されていることを確認します
+
+.. code-block:: cmdin
+
+  kubectl get cb -n staging
+
+.. code-block:: bash
+  :linenos:
+  :caption: 実行結果サンプル
+
+  NAMESPACE   NAME              AGE
+  staging     circuit-breaker   11s
+
+3. 動作確認
+----
+
+動作を確認します
+
+.. code-block:: cmdin
+
+  curl -v -H "Host: webapp.example.com" http://localhost/
+
+.. code-block:: bash
+  :linenos:
+  :caption: 実行結果サンプル
+  :emphasize-lines: 10,19
+
+  *   Trying 127.0.0.1:80...
+  * TCP_NODELAY set
+  * Connected to localhost (127.0.0.1) port 80 (#0)
+  > GET / HTTP/1.1
+  > Host: webapp.example.com
+  > User-Agent: curl/7.68.0
+  > Accept: */*
+  >
+  * Mark bundle as not supporting multiuse
+  < HTTP/1.1 200 OK
+  < Server: nginx/1.21.6
+  < Date: Wed, 28 Dec 2022 04:41:15 GMT
+  < Content-Type: text/plain
+  < Content-Length: 12
+  < Connection: keep-alive
+  < X-Mesh-Request-ID: d684b305ee38d3e78e938b548e67ee53
+  < X-Mesh-Request-ID: 6b1ef6c1416917345b4e6d0522347ebd
+  <
+  target v1.0
+  * Connection #0 to host localhost left intact
+
+10行目で ``200 OK`` が応答されており、19行目で フォールバックにより ``target v1.0`` が確認できます
+
+4. 不要設定の削除
+----
+
+不要な設定を削除します
+
+.. code-block:: cmdin
+
+  ## cd ~/f5j-nginx-k8s-apigw-lab/example
+  kubectl delete -f cb-nsm-smi/nic-vs-cb.yaml -n staging
+  kubectl delete -f cb-nsm-smi/nsm-smi-cb.yaml -n staging 
+  kubectl delete --force -f sample-app/target-v2.0-fail.yaml -n staging
+  kubectl apply -f sample-app/target-v2.0-successful.yaml -n staging
+  kubectl delete --force -f sample-app/webapp-gw-targetv2.yaml -n staging
+  kubectl apply -f sample-app/webapp-gw.yaml -n staging
