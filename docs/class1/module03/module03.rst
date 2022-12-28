@@ -1418,7 +1418,7 @@ NICに適用する設定の内容を確認します
 .. code-block:: bash
   :linenos:
   :caption: 実行結果サンプル
-  :emphasize-lines: 14-19,26,29,23
+  :emphasize-lines: 14-18,26,29,23
 
   apiVersion: k8s.nginx.org/v1
   kind: VirtualServer
@@ -1452,8 +1452,8 @@ NICに適用する設定の内容を確認します
       action:
         pass: target-v2-rst
 
-- 14-19行目に、upstream ``target-v2-timeout`` に対する、 ``Passive HealthCheck`` を設定しています
-- 16-19行目に、各種タイムアウト値を指定しています
+- 14-18行目に、upstream ``target-v2-timeout`` に対する、 ``Passive HealthCheck`` を設定しています
+- 16-18行目に、各種タイムアウト値を指定しています
 - パラメータの詳細は `VS/VSR Upstream <https://docs.nginx.com/nginx-ingress-controller/configuration/virtualserver-and-virtualserverroute-resources/#upstream>`__ を参照してください
 - 23行目で、 ``/v1`` の場合 ``target-v1`` への転送、 26行目で、 ``/v2-timeout`` の場合 ``target-v2-timeout`` への転送、29行目で、 ``/v2-rst`` の場合 ``target-v2-rst`` への転送を設定しています
 
@@ -1462,7 +1462,7 @@ NICに適用する設定の内容を確認します
 
 .. code-block:: cmdin
 
-kubectl apply -f cb-passive-nic-vs/nic-vs-cb1.yaml -n staging 
+  kubectl apply -f cb-passive-nic-vs/nic-vs-cb1.yaml -n staging 
 
 
 それぞれの動作確認を行います
@@ -1633,13 +1633,12 @@ kubectl apply -f cb-passive-nic-vs/nic-vs-cb1.yaml -n staging
         error_page 502 =302 "${scheme}://${host}/v1?${args}";
         proxy_intercept_errors on;
       action:
-
+        pass: target-v2-rst
 
 - 29-33行目に、 ``errorPage`` を指定します。このパラメータにより、対象のエラーコード(504)の場合の挙動を指定することができます。ここでは指定のパラメータでリダイレクトするよう指定しています
 - 35-37行目は、 ``location-snippets`` でNGINXの設定を指定します。29-33行目の記述と比較し、より詳細なパラメータの指定が必要となる場合にはこのようにコンフィグを記述することが可能です
 - ``errorPage`` のパラメータの詳細は `VS/VSR ErrorPage <https://docs.nginx.com/nginx-ingress-controller/configuration/virtualserver-and-virtualserverroute-resources/#errorpage>`__ を参照してください
-- location-snipetsで記述した各Directiveの詳細は `error_page <http://nginx.org/en/docs/http/ngx_http_core_module.html#error_page>`__ 、  
-`proxy_intercept_errors <http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_intercept_errors>`__ を参照してください
+- location-snipetsで記述した各Directiveの詳細は `error_page <http://nginx.org/en/docs/http/ngx_http_core_module.html#error_page>`__ 、 `proxy_intercept_errors <http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_intercept_errors>`__ を参照してください
 
 設定をデプロイします
 
@@ -1743,7 +1742,7 @@ kubectl apply -f cb-passive-nic-vs/nic-vs-cb1.yaml -n staging
   kubectl delete --force -f sample-app/target-v2.0-fail.yaml -n staging
   kubectl apply -f sample-app/target-v2.0-successful.yaml -n staging
 
-7. NICのCircuit Breaker (Active Health Check)
+8. NICのCircuit Breaker (Active Health Check)
 ====
 
 RSTの場合には即座にエラーコードに合わせた処理を実施していますが、
@@ -1755,7 +1754,7 @@ RSTの場合には即座にエラーコードに合わせた処理を実施し�
 1. サンプルアプリケーションのデプロイ
 ----
 
-`6. <>`__ で利用したサンプルアプリケーションをデプロイします
+`7. NICのCircuit Breaker(Passive) <https://f5j-nginx-k8s-apigw.readthedocs.io/en/latest/class1/module03/module03.html#niccircuit-breaker-passive-health-check>`__ で利用したサンプルアプリケーションをデプロイします
 
 サンプルアプリケーションをデプロイします。
 
@@ -1903,7 +1902,7 @@ RSTの場合には即座にエラーコードに合わせた処理を実施し�
   * Connection #0 to host localhost left intact
   Wed Dec 28 04:31:33 UTC 2022
 
-リダイレクトの内容は `6. <>`__ の手順と同様です。先程と異なりタイムアウトなく即座にリダイレクトしていることが確認できます
+リダイレクトの内容は `7. NICのCircuit Breaker(Passive) <https://f5j-nginx-k8s-apigw.readthedocs.io/en/latest/class1/module03/module03.html#niccircuit-breaker-passive-health-check>`__ の手順と同様です。先程と異なりタイムアウトなく即座にリダイレクトしていることが確認できます
 
 4. 不要設定の削除
 ----
@@ -1917,10 +1916,10 @@ RSTの場合には即座にエラーコードに合わせた処理を実施し�
   kubectl delete --force -f sample-app/target-v2.0-fail.yaml -n staging
   kubectl apply -f sample-app/target-v2.0-successful.yaml -n staging
 
-8. NSMのCircuit Breaker
+9. NSMのCircuit Breaker
 ====
 
-Circuit Breakerの機能については `7. NICのCircuit Breaker <>`__ の内容を確認してください
+Circuit Breakerの機能については `7. NICのCircuit Breaker(Passive) <https://f5j-nginx-k8s-apigw.readthedocs.io/en/latest/class1/module03/module03.html#niccircuit-breaker-passive-health-check>`__ の内容を確認してください
 
 NSMのCircuit Breakerの動作を確認します。以下の構成で動作を確認します
 
@@ -1928,7 +1927,7 @@ NSMのCircuit Breakerの動作を確認します。以下の構成で動作を�
       :width: 400
 
 - 通信の中継を行う ``webapp`` の転送先を ``target-v2-0-rst`` のみに変更します
-- ``target-v2-0-rst`` は `6. <>`__ の通りRSTを返すアプリケーションが動作します
+- ``target-v2-0-rst`` は `7. NICのCircuit Breaker(Passive) <https://f5j-nginx-k8s-apigw.readthedocs.io/en/latest/class1/module03/module03.html#niccircuit-breaker-passive-health-check>`__ の通りRSTを返すアプリケーションが動作します
 - NSMは通信のエラーを判定した場合に、別のサービスへフォールバックします
 
 1. サンプルアプリケーションをデプロイ
