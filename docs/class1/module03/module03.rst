@@ -1377,7 +1377,7 @@ Circuit Breakerの動作を確認します。以下の構成で動作を確認�
   ## cd ~/f5j-nginx-k8s-apigw-lab/example
   kubectl replace --force -f sample-app/target-v2.0-fail.yaml -n staging
 
-デプロイしたアプリケーションの状態を確認します
+デプロイの結果を確認します
 
 .. code-block:: cmdin
 
@@ -1465,7 +1465,7 @@ NICに適用する設定の内容を確認します
   kubectl apply -f cb-passive-nic-vs/nic-vs-cb1.yaml -n staging 
 
 
-それぞれの動作確認を行います
+それぞれの動作を確認します
 
 アプリケーションがエラーとならない ``/v1`` 宛の通信を確認します
 
@@ -1646,7 +1646,7 @@ NICに適用する設定の内容を確認します
 
   kubectl apply -f cb-passive-nic-vs/nic-vs-cb2.yaml -n staging 
 
-動作確認を行います
+動作を確認します
 
 アプリケーションがタイムアウトする ``/v2-timeout`` 宛の通信を確認します
 
@@ -1761,6 +1761,8 @@ RSTの場合には即座にエラーコードに合わせた処理を実施し�
   ## cd ~/f5j-nginx-k8s-apigw-lab/example
   kubectl replace --force -f sample-app/target-v2.0-fail.yaml -n staging
 
+デプロイの結果を確認します
+
 .. code-block:: cmdin
 
   kubectl get svc,pod -n staging
@@ -1786,7 +1788,7 @@ RSTの場合には即座にエラーコードに合わせた処理を実施し�
 2. NICの設定をデプロイ
 ----
 
-内容を確認します
+設定の内容を確認します
 
 .. code-block:: cmdin
 
@@ -1864,7 +1866,7 @@ RSTの場合には即座にエラーコードに合わせた処理を実施し�
 3. 動作確認
 ----
 
-動作確認を行います
+動作を確認します
 
 .. code-block:: cmdin
 
@@ -1941,6 +1943,8 @@ NSMのCircuit Breakerの動作を確認します。以下の構成で動作を�
   kubectl replace --force -f sample-app/target-v2.0-fail.yaml -n staging
   kubectl replace --force -f sample-app/webapp-gw-targetv2.yaml -n staging
 
+デプロイの結果を確認します
+
 .. code-block:: cmdin
 
   kubectl get svc,pod -n staging
@@ -1999,7 +2003,9 @@ NICは特殊な設定は行わず、シンプルな通信制御の内容とな�
 .. code-block:: cmdin
 
   kubectl apply -f cb-nsm-smi/nic-vs-cb.yaml -n staging
-   
+
+デプロイの結果を確認します
+
 .. code-block:: cmdin
 
   kubectl get vs webapp -n staging
@@ -2011,6 +2017,7 @@ NICは特殊な設定は行わず、シンプルな通信制御の内容とな�
   NAME     STATE   HOST                 IP    PORTS   AGE
   webapp   Valid   webapp.example.com                 40s
 
+動作を確認します
 
 .. code-block:: cmdin
 
