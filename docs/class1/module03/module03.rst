@@ -1756,8 +1756,6 @@ RSTの場合には即座にエラーコードに合わせた処理を実施し�
 
 `7. NICのCircuit Breaker(Passive) <https://f5j-nginx-k8s-apigw.readthedocs.io/en/latest/class1/module03/module03.html#niccircuit-breaker-passive-health-check>`__ で利用したサンプルアプリケーションをデプロイします
 
-サンプルアプリケーションをデプロイします。
-
 .. code-block:: cmdin
 
   ## cd ~/f5j-nginx-k8s-apigw-lab/example
@@ -1798,7 +1796,7 @@ RSTの場合には即座にエラーコードに合わせた処理を実施し�
 .. code-block:: bash
   :linenos:
   :caption: 実行結果サンプル
-  :emphasize-lines: 14-22,31-35
+  :emphasize-lines: 14-20,31-35
 
   apiVersion: k8s.nginx.org/v1
   kind: VirtualServer
@@ -1835,6 +1833,9 @@ RSTの場合には即座にエラーコードに合わせた処理を実施し�
         redirect:
           code: 301
           url: ${scheme}://nic.example.com/v1
+
+- 14-20行目で、Active Health Checkの設定をしています。宛先サービスのinterval、port番号、応答
+- 31-35行目で、エラーが発生した際のリダイレクトを設定します
 
 設定をデプロイします
 
