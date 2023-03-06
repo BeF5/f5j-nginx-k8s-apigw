@@ -16,7 +16,12 @@
 | Google ChromeがSupportブラウザとなります。その他ブラウザでは正しく動作しない場合があることご了承ください。
 | 参照：\ `UDF Supported Browsers and Clients <https://help.udf.f5.com/en/articles/3470266-supported-browsers-and-clients>`__
 
+ラボ環境構成図
+----
 
+   .. image:: ./media/udflab_k8s_Lab_jp.png
+      :width: 400
+      
 Windows Jump HostへのRDP接続
 ----------------------------
 
@@ -57,6 +62,7 @@ Helm とは
       :width: 400
 
 このラボでは、NGINX Ingress Controller(NIC)、NGINX Service Mesh(NSM)、各種監視コンポーネントをHelmを使ってデプロイします
+
 
 
 デプロイする構成について
