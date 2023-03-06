@@ -22,6 +22,16 @@ F5 Labs - Index
 
 - `BLOG:API ゲートウェイ / Ingressコントローラー / サービスメッシュをどのように選択するか？ <https://www.nginx.co.jp/blog/how-do-i-choose-api-gateway-vs-ingress-controller-vs-service-mesh/>`__
 
+
+NGINX セットアップガイド トップページ
+====
+
+NGINX のその他ラボガイドは以下を参照してください
+
+- `NGINX セットアップガイド・ラボガイド <https://f5j-tech-info.readthedocs.io/ja/latest/content03/content3.html>`__
+
+
+
 .. toctree::
    :maxdepth: 3
    :caption: Lab Contents:
