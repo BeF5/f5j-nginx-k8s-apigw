@@ -1122,6 +1122,7 @@ NSMに指定するポリシーの内容を確認します。
 .. code-block:: bash
   :linenos:
   :caption: 実行結果サンプル
+  :emphasize-lines: 7-14,24,28-30,44,48-50
 
   apiVersion: specs.smi-spec.io/v1alpha3
   kind: HTTPRouteGroup
@@ -1177,8 +1178,6 @@ NSMに指定するポリシーの内容を確認します。
     sources:
     - kind: ServiceAccount
       name: webapp
-  
-  :emphasize-lines: 7-14,24,28-30,44,48-50
 
 - 1-14行目で、対象とする条件を指定します。kind は ``HTTPRouteGroup`` となり、オブジェクト名は ``route-group`` です
 - 条件は以下の三種類となります
