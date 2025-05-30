@@ -851,7 +851,7 @@ WAFは数多くの設定により悪意ある通信をブロックすること�
 .. code-block:: cmdin
 
   ## cd ~/f5j-nginx-k8s-apigw-lab/example
-  cat << EOF > ./split-nsm-smi/nic-vs-nsmsplit.yaml
+  cat << EOF > ./jwt-nic-nsm/nic-vs-acl.yaml
   apiVersion: k8s.nginx.org/v1
   kind: VirtualServer
   metadata:
