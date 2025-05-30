@@ -851,20 +851,39 @@ WAFは数多くの設定により悪意ある通信をブロックすること�
 .. code-block:: cmdin
 
   ## cd ~/f5j-nginx-k8s-apigw-lab/example
-  cat << EOF > ./jwt-nic-nsm/nic-vs-acl.yaml
-  apiVersion: k8s.nginx.org/v1
-  kind: VirtualServer
-  metadata:
-    name: webapp
-  spec:
-    host: webapp.example.com
-    upstreams:
-    - name: webapp-svc
-      service: webapp-svc
-      port: 80
-    routes:
-    - path: /
+cat << EOF > ./jwt-nic-nsm/nic-vs-acl.yaml
+apiVersion: k8s.nginx.org/v1
+kind: VirtualServer
+metadata:
+  name: nic
+spec:
+  host: nic.example.com
+  policies:
+  upstreams:
+  - name: target-svc
+    service: target-svc
+    port: 80
+  routes:
+  - path: ~ /.*valid.*
+    action:
+      pass: target-svc
+  - path: /
+    matches:
+    - conditions:
+      - header: X-Type
+        value: valid
       action:
+        pass: target-svc
+    - conditions:
+      - variable: $request_method
+        value: POST
+      action:
+        pass: target-svc
+    action:
+      return:
+        code: 403
+        type: text/plain
+        body: "Error\n"
   EOF
   cat jwt-nic-nsm/nic-vs-acl.yaml
 
